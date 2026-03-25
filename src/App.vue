@@ -20,7 +20,7 @@
       </div>
     </header>
 
-    <main class="app-main" :class="{ 'pad-bottom': activeModule !== 'maker' }">
+    <main class="app-main" :class="{ 'pad-bottom': activeModule !== 'maker' && activeModule !== 'profile' }">
       <section v-if="activeModule === 'template'" class="module-template">
         <div class="theme-grid">
           <div
@@ -104,7 +104,7 @@
               <div class="order-detail">
                 <h3>{{ order.template.name }}</h3>
                 <p>次数: {{ order.usedGenerateCount }} / {{ order.maxGenerateCount }}</p>
-                
+
                 <div v-if="order.historicalTasks && order.historicalTasks.length > 0" class="history-block">
                   <div class="history-title">制作记录：</div>
                   <div v-for="(task, index) in order.historicalTasks" :key="task.taskId" class="history-item">
@@ -135,6 +135,18 @@
               </button>
             </div>
           </article>
+        </div>
+      </section>
+
+      <!-- 我的页面 -->
+      <section v-else-if="activeModule === 'profile'" class="module-profile">
+        <h2 class="module-title">个人中心</h2>
+        <div class="profile-menu">
+          <div class="menu-item" @click="showCustomerService">
+            <span class="menu-icon">💬</span>
+            <span class="menu-text">联系客服</span>
+            <span class="menu-arrow">›</span>
+          </div>
         </div>
       </section>
 
@@ -229,7 +241,11 @@
         <div class="tab-icon">📋</div>
         <span>作品管理</span>
       </div>
-      <div class="tab-item">
+      <div
+        class="tab-item"
+        :class="{ active: activeModule === 'profile' }"
+        @click="activeModule = 'profile'"
+      >
         <div class="tab-icon">👤</div>
         <span>我的</span>
       </div>
@@ -366,6 +382,11 @@ const showNotice = (text) => {
   noticeTimer = window.setTimeout(() => {
     notice.value = "";
   }, 2200);
+};
+
+const showCustomerService = () => {
+  // 这里可以添加联系客服的实际逻辑，比如跳转客服页面、显示客服二维码等
+  showNotice("客服热线：400-888-8888");
 };
 
 const getTemplatePreviewUrl = (template) => {
@@ -876,6 +897,13 @@ html, body, #app {
 
 .module-order { padding: 16px; background: #f5f6f8; min-height: 100vh; }
 .module-title { font-size: 18px; margin: 0 0 16px; text-align: center; display: block; color: #333;}
+.module-profile { padding: 16px; background: #f5f6f8; min-height: 100vh; }
+.profile-menu { background: #fff; border-radius: 12px; overflow: hidden; }
+.menu-item { display: flex; align-items: center; padding: 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+.menu-item:last-child { border-bottom: none; }
+.menu-icon { font-size: 20px; margin-right: 12px; }
+.menu-text { flex: 1; font-size: 15px; color: #333; }
+.menu-arrow { font-size: 18px; color: #ccc; }
 .order-list { display: flex; flex-direction: column; gap: 12px; }
 .order-card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
 .order-header { display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0; }
