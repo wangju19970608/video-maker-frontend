@@ -261,6 +261,20 @@
       </div>
     </transition>
 
+    <transition name="fade">
+      <div v-if="customerServiceInfo" class="modal-overlay" @click.self="customerServiceInfo = null">
+        <div class="modal-content" style="background:#fff; padding: 24px; border-radius: 16px; text-align:center;">
+          <h3 style="margin:0 0 8px 0; color:#333; font-size:16px;">联系客服 ({{ customerServiceInfo.nickname }})</h3>
+          <p style="font-size:12px; color:#888; margin-bottom:16px;">长按识别下方二维码，或点击直接跳转</p>
+          <img v-if="customerServiceInfo.wechatQrUrl" :src="customerServiceInfo.wechatQrUrl" style="width: 200px; height: 200px; object-fit: contain; margin-bottom: 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);" />
+          <div v-if="customerServiceInfo.wechatLink">
+            <a :href="customerServiceInfo.wechatLink" class="btn-primary" style="display:inline-block; text-decoration:none; box-sizing:border-box; width: 100%; border-radius: 20px; padding: 10px 0;">直接唤起微信添加客服</a>
+          </div>
+          <div class="modal-close" style="top: -40px; right: 0;" @click="customerServiceInfo = null">✕</div>
+        </div>
+      </div>
+    </transition>
+
     <transition name="toast">
       <div v-if="notice" class="toast-message">{{ notice }}</div>
     </transition>
@@ -347,6 +361,7 @@ const makerResult = ref(null);
 const making = ref(false);
 const previewMedia = ref(null);
 const currentOrderId = ref(null);
+const customerServiceInfo = ref(null);
 
 let noticeTimer = null;
 let searchTimer = null;
@@ -384,9 +399,18 @@ const showNotice = (text) => {
   }, 2200);
 };
 
-const showCustomerService = () => {
-  // 这里可以添加联系客服的实际逻辑，比如跳转客服页面、显示客服二维码等
-  showNotice("客服热线：400-888-8888");
+const showCustomerService = async () => {
+  try {
+    const { data } = await http.get("/customer-service/contact");
+    if (data) {
+      if (data.wechatQrUrl) {
+        data.wechatQrUrl = resolveApiUrl(data.wechatQrUrl);
+      }
+      customerServiceInfo.value = data;
+    }
+  } catch (error) {
+    showNotice("抱歉，当前暂无可用客服或入口维护中。");
+  }
 };
 
 const getTemplatePreviewUrl = (template) => {
