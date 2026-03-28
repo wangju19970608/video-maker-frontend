@@ -318,6 +318,7 @@
 
 <script setup>
 import axios from "axios";
+import QRCode from "qrcode";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080/api";
@@ -893,31 +894,15 @@ const renderQrcode = async (url) => {
   await sleep(50); // 等待 canvas 挂载
   const canvas = document.getElementById('alipay-qr-canvas');
   if (!canvas || !url) return;
-  // 使用 qrcode 库动态渲染（如未安装则降级展示 URL 文字）
-  if (window.QRCode) {
-    window.QRCode.toCanvas(canvas, url, { width: 200, margin: 2 }, (err) => {
-      if (err) console.error('QR render error:', err);
-    });
-    return;
-  }
-  // 动态加载 qrcode 库
-  await loadScript('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js');
-  if (window.QRCode) {
-    window.QRCode.toCanvas(canvas, url, { width: 200, margin: 2 }, (err) => {
-      if (err) console.error('QR render error:', err);
-    });
+  try {
+    await QRCode.toCanvas(canvas, url, { width: 200, margin: 2 });
+  } catch (err) {
+    console.error('QR render error:', err);
+    throw new Error('二维码生成器加载失败，请检查网络或稍后重试');
   }
 };
 
-const loadScript = (src) => new Promise((resolve, reject) => {
-  const existing = document.querySelector(`script[src="${src}"]`);
-  if (existing) { resolve(); return; }
-  const script = document.createElement('script');
-  script.src = src;
-  script.onload = resolve;
-  script.onerror = reject;
-  document.head.appendChild(script);
-});
+// 已切换为本地 npm 模块 qrcode，移除了废弃的动态加载 loadScript 方法
 
 const startPayPolling = (orderId) => {
   stopPayPolling();
