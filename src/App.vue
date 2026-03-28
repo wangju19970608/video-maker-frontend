@@ -275,6 +275,41 @@
       </div>
     </transition>
 
+    <!-- 支付宝扫码支付弹窗 -->
+    <transition name="fade">
+      <div v-if="payModal.visible" class="modal-overlay" @click.self="closePayModal">
+        <div class="pay-modal-content">
+          <div class="pay-modal-header">
+            <span class="pay-alipay-logo">🔵 支付宝扫码支付</span>
+            <div class="modal-close pay-close" @click="closePayModal">✕</div>
+          </div>
+
+          <div class="pay-amount-row">
+            <span class="pay-amount-label">应付金额</span>
+            <span class="pay-amount-value">¥ {{ payModal.amount }}</span>
+          </div>
+
+          <div class="pay-qrcode-wrap">
+            <div v-if="payModal.loading" class="pay-qr-loading">
+              <div class="pay-spinner"></div>
+              <p>二维码生成中...</p>
+            </div>
+            <canvas v-else id="alipay-qr-canvas" class="pay-qr-canvas"></canvas>
+          </div>
+
+          <div class="pay-tip">
+            <span v-if="payModal.polling">⏳ 等待支付中，请用支付宝扫描上方二维码...</span>
+            <span v-else-if="payModal.error" class="pay-error">{{ payModal.error }}</span>
+            <span v-else>请用支付宝 App 扫描二维码完成付款</span>
+          </div>
+
+          <div class="pay-orderinfo">
+            <span>订单号：{{ payModal.orderNo }}</span>
+          </div>
+        </div>
+      </div>
+    </transition>
+
     <transition name="toast">
       <div v-if="notice" class="toast-message">{{ notice }}</div>
     </transition>
@@ -362,6 +397,19 @@ const making = ref(false);
 const previewMedia = ref(null);
 const currentOrderId = ref(null);
 const customerServiceInfo = ref(null);
+
+// 支付宝扫码弹窗状态
+const payModal = reactive({
+  visible: false,
+  loading: false,
+  polling: false,
+  amount: '0.00',
+  orderNo: '',
+  qrcodeUrl: '',
+  error: '',
+  orderId: null
+});
+let payPollTimer = null;
 
 let noticeTimer = null;
 let searchTimer = null;
@@ -791,9 +839,8 @@ const openOrderDetail = async (order) => {
 const jumpOrder = async (order) => {
   try {
     if (order.status === "pending") {
-      await http.put(`/orders/${order.id}/pay`);
-      await loadOrders();
-      showNotice("支付成功，订单状态已更新。" );
+      // 未付款 => 弹出支付宝二维码
+      await openPayModal(order);
       return;
     }
 
@@ -807,6 +854,103 @@ const jumpOrder = async (order) => {
   } catch (error) {
     showNotice(getErrorMessage(error, "订单跳转失败。"));
   }
+};
+
+const openPayModal = async (order) => {
+  // 初始化弹窗状态
+  Object.assign(payModal, {
+    visible: true,
+    loading: true,
+    polling: false,
+    amount: Number(order.amount || 0).toFixed(2),
+    orderNo: order.orderNo || '',
+    qrcodeUrl: '',
+    error: '',
+    orderId: order.id
+  });
+
+  try {
+    const { data } = await http.get(`/orders/${order.id}/payment-qrcode`);
+    const qrcodeUrl = data.qrcodeUrl || data.qrcode_url || '';
+    payModal.qrcodeUrl = qrcodeUrl;
+    payModal.orderNo = data.orderNo || order.orderNo || '';
+    payModal.amount = Number(data.amount || order.amount || 0).toFixed(2);
+    payModal.loading = false;
+
+    // 渲染二维码
+    await renderQrcode(qrcodeUrl);
+
+    // 开始轮询订单状态
+    payModal.polling = true;
+    startPayPolling(order.id);
+  } catch (error) {
+    payModal.loading = false;
+    payModal.error = getErrorMessage(error, '二维码获取失败，请稍后重试');
+  }
+};
+
+const renderQrcode = async (url) => {
+  await sleep(50); // 等待 canvas 挂载
+  const canvas = document.getElementById('alipay-qr-canvas');
+  if (!canvas || !url) return;
+  // 使用 qrcode 库动态渲染（如未安装则降级展示 URL 文字）
+  if (window.QRCode) {
+    window.QRCode.toCanvas(canvas, url, { width: 200, margin: 2 }, (err) => {
+      if (err) console.error('QR render error:', err);
+    });
+    return;
+  }
+  // 动态加载 qrcode 库
+  await loadScript('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js');
+  if (window.QRCode) {
+    window.QRCode.toCanvas(canvas, url, { width: 200, margin: 2 }, (err) => {
+      if (err) console.error('QR render error:', err);
+    });
+  }
+};
+
+const loadScript = (src) => new Promise((resolve, reject) => {
+  const existing = document.querySelector(`script[src="${src}"]`);
+  if (existing) { resolve(); return; }
+  const script = document.createElement('script');
+  script.src = src;
+  script.onload = resolve;
+  script.onerror = reject;
+  document.head.appendChild(script);
+});
+
+const startPayPolling = (orderId) => {
+  stopPayPolling();
+  const poll = async () => {
+    if (!payModal.visible || payModal.orderId !== orderId) return;
+    try {
+      const { data } = await http.get(`/orders/${orderId}`);
+      if (data.status === 'paid') {
+        payModal.polling = false;
+        payModal.visible = false;
+        await loadOrders();
+        showNotice('🎉 支付成功！订单已更新。');
+        return;
+      }
+    } catch { /* 忽略轮询错误 */ }
+    payPollTimer = window.setTimeout(poll, 2000);
+  };
+  payPollTimer = window.setTimeout(poll, 2000);
+};
+
+const stopPayPolling = () => {
+  if (payPollTimer) {
+    clearTimeout(payPollTimer);
+    payPollTimer = null;
+  }
+};
+
+const closePayModal = () => {
+  stopPayPolling();
+  payModal.visible = false;
+  payModal.polling = false;
+  // 刷新订单列表（可能已在别处支付）
+  loadOrders();
 };
 
 const deleteOrder = async (orderId) => {
@@ -842,6 +986,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopTaskPolling();
+  stopPayPolling();
   closePreview();
   if (noticeTimer) {
     clearTimeout(noticeTimer);
@@ -982,4 +1127,92 @@ html, body, #app {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .toast-enter-active, .toast-leave-active { transition: opacity 0.3s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; }
+
+/* ─── 支付宝扫码弹窗 ─────────────────────────────── */
+.pay-modal-content {
+  background: #fff;
+  border-radius: 20px;
+  width: 92%;
+  max-width: 340px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+.pay-modal-header {
+  background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pay-alipay-logo {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.pay-close {
+  position: static;
+  color: rgba(255,255,255,0.8);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+.pay-amount-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 16px 24px 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.pay-amount-label { font-size: 13px; color: #888; }
+.pay-amount-value { font-size: 28px; font-weight: 700; color: #ff4d4f; }
+.pay-qrcode-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 24px;
+  background: #fafcff;
+}
+.pay-qr-canvas {
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(22,119,255,0.12);
+}
+.pay-qr-loading {
+  width: 200px;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 13px;
+  gap: 12px;
+}
+.pay-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #e0eaff;
+  border-top-color: #1677ff;
+  border-radius: 50%;
+  animation: pay-spin 0.8s linear infinite;
+}
+@keyframes pay-spin { to { transform: rotate(360deg); } }
+.pay-tip {
+  text-align: center;
+  font-size: 12px;
+  color: #888;
+  padding: 0 24px 12px;
+  line-height: 1.6;
+  min-height: 32px;
+}
+.pay-error { color: #ff4d4f; }
+.pay-orderinfo {
+  text-align: center;
+  font-size: 11px;
+  color: #ccc;
+  padding-bottom: 16px;
+}
 </style>
