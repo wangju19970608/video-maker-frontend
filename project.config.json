@@ -1,6 +1,6 @@
 {
   "appid": "wx3c93b453e2becd26",
-  "miniprogramRoot": "dist/build/mp-weixin/",
+  "miniprogramRoot": "dist/dev/mp-weixin/",
   "compileType": "miniprogram",
   "libVersion": "3.15.1",
   "packOptions": {
@@ -27,5 +27,5 @@
     "tabIndent": "insertSpaces",
     "tabSize": 2
   },
-  "srcMiniprogramRoot": "dist/build/mp-weixin/"
+  "srcMiniprogramRoot": "dist/dev/mp-weixin/"
 }

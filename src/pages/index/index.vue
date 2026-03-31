@@ -320,7 +320,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080/api";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://118.178.169.23:38080/api";
 const API_ROOT = API_BASE.replace(/\/api\/?$/, "");
 const DEFAULT_TEMPLATE_PREVIEW = "/api/assets/templates/1.png";
 
