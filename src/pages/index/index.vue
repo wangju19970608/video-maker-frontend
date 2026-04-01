@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="mobile-app">
     <header class="app-header">
       <div class="search-box">
@@ -785,13 +785,7 @@ const searchTemplates = async () => {
 };
 
 const showTemplateDetail = async (template) => {
-  try {
-    const { data } = await http.get(`/templates/${template.id}`);
-    const detail = normalizeTemplate(data);
-    showNotice(`模板“${detail.name}”支持一键替换文字和图片。`);
-  } catch (error) {
-    showNotice(getErrorMessage(error, "获取模板详情失败。"));
-  }
+  previewTemplate(template);
 };
 
 const addOrder = async (template) => {

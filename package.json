@@ -16,6 +16,6 @@
   },
   "devDependencies": {
     "@dcloudio/vite-plugin-uni": "^3.0.0-alpha-3090920231225001",
-    "vite": "4.5.2"
+    "vite": "^5.2.8"
   }
 }
