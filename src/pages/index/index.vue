@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="mobile-app">
     <header class="app-header">
       <div class="search-box">
@@ -432,6 +432,7 @@ const making = ref(false);
 const previewMedia = ref(null);
 const currentOrderId = ref(null);
 const customerServiceInfo = ref(null);
+const userOpenid = ref(""); // 缓存微信 OpenID
 
 // 支付宝扫码弹窗状态
 const payModal = reactive({
@@ -923,11 +924,109 @@ const openOrderDetail = async (order) => {
   }
 };
 
+/**
+ * 获取微信 OpenID
+ */
+const getWechatOpenid = async () => {
+  if (userOpenid.value) return userOpenid.value;
+  
+  return new Promise((resolve, reject) => {
+    // #ifdef MP-WEIXIN
+    uni.login({
+      provider: 'weixin',
+      success: async (loginRes) => {
+        try {
+          const { data } = await http.get("/wechat/login", { params: { code: loginRes.code } });
+          if (data && data.openid) {
+            userOpenid.value = data.openid;
+            resolve(data.openid);
+          } else {
+            reject(new Error("获取 OpenID 失败"));
+          }
+        } catch (err) {
+          reject(err);
+        }
+      },
+      fail: (err) => reject(err)
+    });
+    // #endif
+    // #ifndef MP-WEIXIN
+    resolve(""); // 非微信小程序环境返回空
+    // #endif
+  });
+};
+
+/**
+ * 处理微信支付
+ */
+const handleWechatPay = async (order) => {
+  try {
+    // 1. 获取 OpenID (仅限微信小程序)
+    let openid = "";
+    // #ifdef MP-WEIXIN
+    uni.showLoading({ title: "正在登录..." });
+    openid = await getWechatOpenid();
+    uni.hideLoading();
+    // #endif
+
+    if (!openid && uni.getSystemInfoSync().platform === 'devtools') {
+        // 开发工具模拟调试，如果没openid可能是配置问题
+        console.warn("未获取到 OpenID，请检查后端 appId 配置是否一致");
+    }
+
+    // 2. 调用后端下单接口
+    const { data } = await http.post(`/wechat/pay/${order.id}`, null, {
+      params: { openid }
+    });
+
+    // 3. 唤起微信原生支付
+    uni.requestPayment({
+      provider: 'wxpay',
+      timeStamp: data.timeStamp,
+      nonceStr: data.nonceStr,
+      package: data.packageValue || data.package,
+      signType: data.signType || 'MD5',
+      paySign: data.paySign,
+      success: async () => {
+        showNotice("🎉 支付成功！");
+        await loadOrders();
+      },
+      fail: (err) => {
+        console.error("支付取消或失败:", err);
+        if (err.errMsg && err.errMsg.includes("cancel")) {
+           showNotice("已取消支付");
+        } else {
+           showNotice("支付失败，请稍后重试");
+        }
+      }
+    });
+
+  } catch (error) {
+    uni.hideLoading();
+    // 如果微信支付报错，尝试降级到支付宝扫码（或者提示错误）
+    console.error("微信支付启动失败:", error);
+    // 降级逻辑：如果在非微信小程序环境，弹出支付宝二维码
+    // #ifndef MP-WEIXIN
+    await openPayModal(order);
+    // #endif
+    // #ifdef MP-WEIXIN
+    showNotice(getErrorMessage(error, "启动微信支付失败"));
+    // #endif
+  }
+};
+
 const jumpOrder = async (order) => {
   try {
     if (order.status === "pending") {
-      // 未付款 => 弹出支付宝二维码
+      // 优先尝试微信原生支付
+      // #ifdef MP-WEIXIN
+      await handleWechatPay(order);
+      // #endif
+      
+      // 非微信小程序环境，弹出支付宝二维码
+      // #ifndef MP-WEIXIN
       await openPayModal(order);
+      // #endif
       return;
     }
 
