@@ -161,7 +161,28 @@
           <button v-else class="btn-preview" style="z-index: 2;" @click="previewTemplate(makerTemplate)">预览演示</button>
         </div>
         <div class="maker-form">
-          <template v-if="makerTemplate && makerTemplate.templateType === 'video'">
+          <!-- 动态表单：如果模板有 formFields 配置，则动态渲染 -->
+          <template v-if="makerTemplate && makerTemplate.formFields && makerTemplate.formFields.length > 0">
+            <div v-for="field in makerTemplate.formFields" :key="field.key" class="form-group">
+              <label>{{ field.label || field.key }}</label>
+              <input
+                v-if="field.type === 'text' || field.type === 'number' || field.type === 'date'"
+                v-model.trim="makerForm.dynamicFields[field.key]"
+                :type="field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'"
+                :placeholder="field.placeholder || '请输入' + (field.label || field.key)"
+                :required="field.required"
+              />
+              <div v-else-if="field.type === 'image'">
+                <button @click="onChooseImageForField(field.key)" class="btn-outline" style="width:100%; padding: 10px; border-radius: 4px;">选择照片</button>
+                <div v-if="makerForm.dynamicFields[field.key + '_preview']" style="margin-top: 10px; text-align: center;">
+                  <img :src="makerForm.dynamicFields[field.key + '_preview']" style="max-width: 100%; border-radius: 4px; max-height: 200px; object-fit: contain;" />
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 兼容老模板：如果没有 formFields，使用硬编码字段 -->
+          <template v-else-if="makerTemplate && makerTemplate.templateType === 'video'">
             <div class="form-group">
               <label>新郎/新娘姓名（或名称）</label>
               <input v-model.trim="makerForm.name" placeholder="请输入姓名或名称" />
@@ -182,7 +203,7 @@
               </div>
             </div>
           </template>
-          
+
           <template v-else>
             <div class="form-group">
               <label>新郎/新娘姓名</label>
@@ -425,7 +446,8 @@ const makerForm = reactive({
   age: "",
   time: "",
   hotel: "",
-  coverImageFile: null
+  coverImageFile: null,
+  dynamicFields: {}
 });
 const makerResult = ref(null);
 const making = ref(false);
@@ -632,7 +654,8 @@ const normalizeTemplate = (raw) => {
     price: Number(raw?.price || 0),
     colors,
     coverUrl: resolveApiUrl(raw?.coverUrl || ""),
-    previewUrl: resolveApiUrl(raw?.previewUrl || "")
+    previewUrl: resolveApiUrl(raw?.previewUrl || ""),
+    formFields: Array.isArray(raw?.formFields) ? raw.formFields : []
   };
 };
 
@@ -838,7 +861,8 @@ const openMaker = (template) => {
     age: "",
     time: "",
     hotel: "",
-    coverImageFile: null
+    coverImageFile: null,
+    dynamicFields: {}
   });
   if (localImagePreview.value) {
     URL.revokeObjectURL(localImagePreview.value);
@@ -856,6 +880,17 @@ const onChooseImage = () => {
       const tempFilePath = res.tempFilePaths[0];
       makerForm.coverImageFile = tempFilePath;
       localImagePreview.value = tempFilePath;
+    }
+  });
+};
+
+const onChooseImageForField = (fieldKey) => {
+  uni.chooseImage({
+    count: 1,
+    success: (res) => {
+      const tempFilePath = res.tempFilePaths[0];
+      makerForm.dynamicFields[fieldKey + '_file'] = tempFilePath;
+      makerForm.dynamicFields[fieldKey + '_preview'] = tempFilePath;
     }
   });
 };
@@ -890,11 +925,30 @@ const generateVideo = async () => {
       if (currentOrderId.value) formData.orderId = currentOrderId.value;
       if (makerForm.hotel) formData.hotel = makerForm.hotel;
 
-      if (makerForm.coverImageFile) {
+      // 追加动态字段（文本类）
+      const hasDynamic = makerTemplate.value.formFields && makerTemplate.value.formFields.length > 0;
+      if (hasDynamic) {
+        Object.entries(makerForm.dynamicFields).forEach(([k, v]) => {
+          if (!k.endsWith('_file') && !k.endsWith('_preview') && v != null && v !== '') {
+            formData[k] = v;
+          }
+        });
+      }
+
+      // 找出图片字段的文件路径（第一个 image 类型字段）
+      let imageFilePath = makerForm.coverImageFile;
+      if (hasDynamic && !imageFilePath) {
+        const imgField = makerTemplate.value.formFields.find(f => f.type === 'image');
+        if (imgField) {
+          imageFilePath = makerForm.dynamicFields[imgField.key + '_file'];
+        }
+      }
+
+      if (imageFilePath) {
         const uploadRes = await new Promise((resolve, reject) => {
           uni.uploadFile({
             url: API_BASE + "/video/tasks/multipart?async=true",
-            filePath: makerForm.coverImageFile,
+            filePath: imageFilePath,
             name: 'coverImage',
             formData: formData,
             success: (uploadFileRes) => resolve(uploadFileRes),
@@ -908,14 +962,30 @@ const generateVideo = async () => {
         taskInfo = normalizeTaskResult(data);
       }
     } else {
-      const { data } = await http.post("/video/tasks?async=true", {
+      const payload = {
         templateId: makerTemplate.value.id,
         name: makerForm.name,
         age: makerForm.age,
         time: makerForm.time,
         hotel: makerForm.hotel,
         orderId: currentOrderId.value || undefined
-      });
+      };
+
+      // 追加动态字段
+      const hasDynamic = makerTemplate.value.formFields && makerTemplate.value.formFields.length > 0;
+      if (hasDynamic) {
+        const dynamicFields = {};
+        Object.entries(makerForm.dynamicFields).forEach(([k, v]) => {
+          if (!k.endsWith('_file') && !k.endsWith('_preview') && v != null && v !== '') {
+            dynamicFields[k] = v;
+          }
+        });
+        if (Object.keys(dynamicFields).length > 0) {
+          payload.dynamicFields = dynamicFields;
+        }
+      }
+
+      const { data } = await http.post("/video/tasks?async=true", payload);
       taskInfo = normalizeTaskResult(data);
     }
 
