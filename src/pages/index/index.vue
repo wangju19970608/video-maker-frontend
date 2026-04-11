@@ -367,13 +367,21 @@ const request = (method, url, config = {}) => {
       timeout: config.timeout || 60000,
       success: (res) => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(res); 
+          resolve(res);
         } else {
           reject({ response: { data: res.data } });
         }
       },
       fail: (err) => reject(err || new Error('Request failed'))
     };
+    // 添加 Authorization header
+    const token = uni.getStorageSync("userToken");
+    if (token) {
+      options.header = {
+        ...options.header,
+        'Authorization': `Bearer ${token}`
+      };
+    }
     if (config.data || config.params) {
       const payload = config.data || config.params;
       const cleanPayload = {};
@@ -385,7 +393,10 @@ const request = (method, url, config = {}) => {
       options.data = cleanPayload;
     }
     if (config.headers) {
-      options.header = config.headers;
+      options.header = {
+        ...options.header,
+        ...config.headers
+      };
     }
     uni.request(options);
   });
@@ -839,6 +850,11 @@ const loadTemplates = async () => {
 };
 
 const loadOrders = async () => {
+  // 未登录时不加载订单
+  if (!userToken.value || !userInfo.value) {
+    orders.value = [];
+    return;
+  }
   const { data } = await http.get("/orders");
   orders.value = Array.isArray(data) ? data.map(normalizeOrder) : [];
 };
@@ -856,6 +872,12 @@ const showTemplateDetail = async (template) => {
 };
 
 const addOrder = async (template) => {
+  // 检查是否登录
+  if (!userToken.value || !userInfo.value) {
+    showNotice("请先登录后再操作");
+    activeModule.value = 'profile';
+    return;
+  }
   try {
     await http.post("/orders", {
       templateId: template.id
