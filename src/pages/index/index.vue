@@ -142,6 +142,19 @@
       <!-- 我的页面 -->
       <section v-else-if="activeModule === 'profile'" class="module-profile">
         <h2 class="module-title">个人中心</h2>
+        <div v-if="userInfo" class="profile-user">
+          <div class="profile-avatar-wrap">
+            <img v-if="userInfo.avatarUrl" :src="userInfo.avatarUrl" class="profile-avatar" />
+            <div v-else class="profile-avatar-fallback">U</div>
+          </div>
+          <div class="profile-meta">
+            <div class="profile-name">{{ userInfo.nickname || '微信用户' }}</div>
+            <div class="profile-id">ID: {{ userInfo.id }}</div>
+          </div>
+        </div>
+        <div v-else class="profile-login-tip">
+          <button class="btn-primary" @click="handleWxLoginTap">微信授权登录</button>
+        </div>
         <div class="profile-menu">
           <div class="menu-item" @click="showCustomerService">
             <span class="menu-icon">💬</span>
@@ -455,6 +468,8 @@ const previewMedia = ref(null);
 const currentOrderId = ref(null);
 const customerServiceInfo = ref(null);
 const userOpenid = ref(""); // 缓存微信 OpenID
+const userToken = ref(uni.getStorageSync("userToken") || "");
+const userInfo = ref(JSON.parse(uni.getStorageSync("userInfo") || "null"));
 
 // 支付宝扫码弹窗状态
 const payModal = reactive({
@@ -1022,6 +1037,131 @@ const openOrderDetail = async (order) => {
   }
 };
 
+const parseWxLoginResult = (resp) => {
+  const raw = resp?.data || {};
+  if (raw?.success === false) {
+    throw new Error(raw.message || "微信登录失败");
+  }
+  return raw?.data || raw;
+};
+
+const handleWxLogin = async () => {
+  // #ifdef MP-WEIXIN
+  try {
+    uni.showLoading({ title: "登录中..." });
+    const loginRes = await new Promise((resolve, reject) => {
+      uni.login({
+        provider: "weixin",
+        success: resolve,
+        fail: reject
+      });
+    });
+    if (!loginRes?.code) {
+      throw new Error("未获取到微信登录凭证");
+    }
+
+    const profileRes = await new Promise((resolve, reject) => {
+      uni.getUserProfile({
+        desc: "用于完善会员资料",
+        success: resolve,
+        fail: reject
+      });
+    });
+
+    const wxUserInfo = profileRes?.userInfo || {};
+    const resp = await http.post("/user/wx-login", {
+      code: loginRes.code,
+      nickname: wxUserInfo.nickName || wxUserInfo.nickname,
+      avatarUrl: wxUserInfo.avatarUrl
+    });
+    const data = parseWxLoginResult(resp);
+    if (!data?.token) {
+      throw new Error("登录响应缺少token");
+    }
+
+    userToken.value = data.token;
+    userInfo.value = {
+      id: data.userId,
+      openid: data.openid,
+      nickname: data.nickname,
+      avatarUrl: data.avatarUrl
+    };
+    userOpenid.value = data.openid || "";
+    uni.setStorageSync("userToken", data.token);
+    uni.setStorageSync("userInfo", JSON.stringify(userInfo.value));
+    showNotice("登录成功");
+  } catch (error) {
+    showNotice(getErrorMessage(error, "登录失败，请重试"));
+  } finally {
+    uni.hideLoading();
+  }
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  showNotice("请在微信小程序中使用");
+  // #endif
+};
+
+const handleWxLoginTap = () => {
+  // #ifdef MP-WEIXIN
+  // 注意：getUserProfile 必须直接同步调用，不能经过 async/await 链
+  uni.getUserProfile({
+    desc: "用于完善会员资料",
+    success: (profileRes) => {
+      uni.showLoading({ title: "登录中..." });
+      uni.login({
+        provider: "weixin",
+        success: (loginRes) => {
+          if (!loginRes?.code) {
+            uni.hideLoading();
+            showNotice("未获取到微信登录凭证");
+            return;
+          }
+          const wxUserInfo = profileRes?.userInfo || {};
+          http.post("/user/wx-login", {
+            code: loginRes.code,
+            nickname: wxUserInfo.nickName || wxUserInfo.nickname,
+            avatarUrl: wxUserInfo.avatarUrl
+          }).then((resp) => {
+            const data = parseWxLoginResult(resp);
+            if (!data?.token) {
+              throw new Error("登录响应缺少token");
+            }
+            userToken.value = data.token;
+            userInfo.value = {
+              id: data.userId,
+              openid: data.openid,
+              nickname: data.nickname,
+              avatarUrl: data.avatarUrl
+            };
+            userOpenid.value = data.openid || "";
+            uni.setStorageSync("userToken", data.token);
+            uni.setStorageSync("userInfo", JSON.stringify(userInfo.value));
+            showNotice("登录成功");
+          }).catch((error) => {
+            showNotice(getErrorMessage(error, "登录失败，请重试"));
+          }).finally(() => {
+            uni.hideLoading();
+          });
+        },
+        fail: (err) => {
+          uni.hideLoading();
+          showNotice("微信登录失败，请重试");
+        }
+      });
+    },
+    fail: (err) => {
+      console.error("getUserProfile 失败", err);
+      showNotice("授权失败，请重试");
+    }
+  });
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  showNotice("请在微信小程序中使用");
+  // #endif
+};
+
 /**
  * 获取微信 OpenID
  */
@@ -1331,6 +1471,14 @@ page {
 .menu-icon { font-size: 20px; margin-right: 12px; }
 .menu-text { flex: 1; font-size: 15px; color: #333; }
 .menu-arrow { font-size: 18px; color: #ccc; }
+.profile-login-tip { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: center; }
+.profile-user { background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 12px; display: flex; align-items: center; }
+.profile-avatar-wrap { margin-right: 10px; }
+.profile-avatar { width: 44px; height: 44px; border-radius: 50%; }
+.profile-avatar-fallback { width: 44px; height: 44px; border-radius: 50%; background: #f1f3f5; color: #666; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+.profile-meta { display: flex; flex-direction: column; }
+.profile-name { font-size: 14px; color: #222; font-weight: 600; }
+.profile-id { font-size: 12px; color: #888; margin-top: 3px; }
 .order-list { display: flex; flex-direction: column; gap: 16px; padding-bottom: 20px; }
 .order-card { background: #fff; border-radius: 16px; padding: 18px; box-shadow: 0 4px 24px rgba(0,0,0,0.04); }
 .order-header { display: flex; justify-content: space-between; font-size: 13px; color: #999; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #f5f5f5; }
