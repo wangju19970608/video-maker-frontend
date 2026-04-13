@@ -322,19 +322,6 @@
       </div>
     </transition>
 
-    <transition name="fade">
-      <div v-if="customerServiceInfo" class="modal-overlay" @click.self="customerServiceInfo = null">
-        <div class="modal-content" style="background:#fff; padding: 24px; border-radius: 16px; text-align:center;">
-          <h3 style="margin:0 0 8px 0; color:#333; font-size:16px;">联系客服 ({{ customerServiceInfo.nickname }})</h3>
-          <p style="font-size:12px; color:#888; margin-bottom:16px;">长按识别下方二维码，或点击直接跳转</p>
-          <img v-if="customerServiceInfo.wechatQrUrl" :src="customerServiceInfo.wechatQrUrl" style="width: 200px; height: 200px; object-fit: contain; margin-bottom: 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);" />
-          <div v-if="customerServiceInfo.wechatLink">
-            <button class="btn-primary" @click="openWechatCustomerService(customerServiceInfo.wechatLink)" style="display:inline-block; box-sizing:border-box; width: 100%; border-radius: 20px; padding: 10px 0; border: none;">直接对话客服 (免加好友)</button>
-          </div>
-          <div class="modal-close" style="top: -40px; right: 0;" @click="customerServiceInfo = null">✕</div>
-        </div>
-      </div>
-    </transition>
 
     <!-- 支付宝扫码支付弹窗 -->
     <transition name="fade">
@@ -557,45 +544,33 @@ const showNotice = (text) => {
   }, 2200);
 };
 
+/**
+ * 直接唤起企微客服聊天窗口（免加好友）
+ */
 const showCustomerService = async () => {
+  // #ifdef MP-WEIXIN
   try {
     const { data } = await http.get("/customer-service/contact");
-    if (data) {
-      if (data.wechatQrUrl) {
-        data.wechatQrUrl = resolveApiUrl(data.wechatQrUrl);
+    if (!data || !data.corpId || !data.kfUrl) {
+      showNotice("暂无可用客服，请稍后再试");
+      return;
+    }
+    wx.openCustomerServiceChat({
+      corpId: data.corpId,
+      extInfo: { url: data.kfUrl },
+      success() {},
+      fail(err) {
+        console.error("唤起客服失败", err);
+        showNotice("唤起客服失败: " + (err.errMsg || err.message || "未知错误"));
       }
-      customerServiceInfo.value = data;
-    }
+    });
   } catch (error) {
-    showNotice("抱歉，当前暂无可用客服或入口维护中。");
+    showNotice("暂无可用客服，请稍后再试");
   }
-};
-
-const openWechatCustomerService = (url) => {
-  // 替换为你真实的企微 corpId
-  const corpId = "wwad96d84f24fe1596"; 
-  
-  if (!url) {
-    showNotice("客服链接无效");
-    return;
-  }
-  
-  // #ifdef MP-WEIXIN
-  wx.openCustomerServiceChat({
-    extInfo: { url: url },
-    corpId: corpId,
-    success(res) {
-      console.log("唤起客服成功", res);
-    },
-    fail(err) {
-      console.error("唤起客服失败", err);
-      showNotice("唤起客服失败: " + (err.errMsg || err.message));
-    }
-  });
   // #endif
-  
+
   // #ifndef MP-WEIXIN
-  window.location.href = url;
+  showNotice("请在微信小程序中使用客服功能");
   // #endif
 };
 
