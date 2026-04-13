@@ -1,6 +1,6 @@
 <template>
   <div class="mobile-app">
-    <header class="app-header">
+    <header v-if="activeModule === 'template'" class="app-header">
       <div class="search-box">
         <span class="search-icon">🔍</span>
         <input
@@ -71,6 +71,7 @@
             <div class="card-cover" :style="coverStyle(template)">
               <video v-if="(getTemplatePreviewUrl(template) || '').endsWith('.mp4')" :src="getTemplatePreviewUrl(template)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; pointer-events: none;" muted playsinline loop onmouseover="this.play()" onmouseout="this.pause()"></video>
               <span v-if="template.tag" class="card-tag" style="z-index: 1;">{{ template.tag }}</span>
+              <span class="card-price" style="z-index: 1;">¥{{ template.price || '0.00' }}</span>
               <div class="card-overlay" style="z-index: 2;">
                 <button type="button" @click.stop="addOrder(template)" class="btn-make">制作</button>
               </div>
@@ -90,7 +91,10 @@
           <article v-for="order in orders" :key="order.id" class="order-card">
             <div class="order-header">
               <span class="order-date">{{ order.createdAt }}</span>
-              <span class="order-status" :class="order.status">{{ order.status === 'pending' ? '未付款' : '已付款' }}</span>
+              <span class="order-status" :class="order.status">
+                <span v-if="order.status === 'pending'" class="order-price">¥{{ order.amount || '0.00' }}</span>
+                {{ order.status === 'pending' ? '未付款' : '已付款' }}
+              </span>
             </div>
             <div class="order-body">
               <div class="order-cover" :style="coverStyle(order.template)"></div>
@@ -141,24 +145,49 @@
 
       <!-- 我的页面 -->
       <section v-else-if="activeModule === 'profile'" class="module-profile">
-        <h2 class="module-title">个人中心</h2>
-        <div v-if="userInfo" class="profile-user">
-          <div class="profile-avatar-wrap">
-            <img v-if="userInfo.avatarUrl" :src="userInfo.avatarUrl" class="profile-avatar" />
-            <div v-else class="profile-avatar-fallback">U</div>
+        <div class="profile-header-bg">
+          <div class="profile-header-title">个人中心</div>
+        </div>
+        <div class="profile-card">
+          <div v-if="userInfo" class="profile-user-info">
+            <div class="profile-avatar-wrap">
+              <img v-if="userInfo.avatarUrl" :src="userInfo.avatarUrl" class="profile-avatar" />
+              <div v-else class="profile-avatar-fallback">
+                <span style="font-size: 24px;">👤</span>
+              </div>
+            </div>
+            <div class="profile-meta">
+              <div class="profile-name">{{ userInfo.nickname || '微信用户' }}</div>
+              <div class="profile-id">ID: {{ userInfo.id }}</div>
+            </div>
           </div>
-          <div class="profile-meta">
-            <div class="profile-name">{{ userInfo.nickname || '微信用户' }}</div>
-            <div class="profile-id">ID: {{ userInfo.id }}</div>
+          <div v-else class="profile-user-info unlogged">
+            <div class="profile-avatar-wrap">
+              <div class="profile-avatar-fallback">
+                <span style="font-size: 24px;">?</span>
+              </div>
+            </div>
+            <div class="profile-meta" style="flex:1;">
+              <div class="profile-name">未登录</div>
+              <div class="profile-id">登录后解锁全部专属功能</div>
+            </div>
+            <button class="btn-login-small" @click="handleSilentWxLogin">一键登录</button>
           </div>
         </div>
-        <div v-else class="profile-login-tip">
-          <button class="btn-primary" @click="handleWxLoginTap">微信授权登录</button>
-        </div>
+
         <div class="profile-menu">
           <div class="menu-item" @click="showCustomerService">
-            <span class="menu-icon">💬</span>
-            <span class="menu-text">联系客服</span>
+            <div class="menu-icon-wrap" style="background: #fff0f6; color: #ff4d6d;">
+              <span>💬</span>
+            </div>
+            <span class="menu-text">联系专属客服</span>
+            <span class="menu-arrow">›</span>
+          </div>
+          <div v-if="userInfo" class="menu-item" @click="handleLogout">
+            <div class="menu-icon-wrap" style="background: #f5f5f5; color: #888;">
+              <span>🚪</span>
+            </div>
+            <span class="menu-text">退出当前账号</span>
             <span class="menu-arrow">›</span>
           </div>
         </div>
@@ -166,8 +195,9 @@
 
       <section v-else class="module-maker">
         <div class="maker-nav">
-          <button @click="backToTemplates" class="btn-back">← 返回</button>
+          <div @click="backToTemplates" class="btn-back">← 返回</div>
           <h2>信息填写</h2>
+          <div style="width: 60px;"></div>
         </div>
         <div class="maker-cover" :style="coverStyle(makerTemplate)">
           <video v-if="(getTemplatePreviewUrl(makerTemplate) || '').endsWith('.mp4')" :src="getTemplatePreviewUrl(makerTemplate)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1;" controls playsinline></video>
@@ -263,10 +293,6 @@
       >
         <div class="tab-icon">🏠</div>
         <span>首页</span>
-      </div>
-      <div class="tab-item">
-        <div class="tab-icon">🖼️</div>
-        <span>海报</span>
       </div>
       <div 
         class="tab-item" 
@@ -1184,6 +1210,57 @@ const handleWxLoginTap = () => {
   // #endif
 };
 
+const handleSilentWxLogin = () => {
+  // #ifdef MP-WEIXIN
+  uni.login({
+    provider: "weixin",
+    success: (loginRes) => {
+      if (!loginRes?.code) return;
+      http.post("/user/wx-login", {
+        code: loginRes.code,
+        nickname: "微信用户",
+        avatarUrl: ""
+      }).then((resp) => {
+        const data = parseWxLoginResult(resp);
+        if (data?.token) {
+          userToken.value = data.token;
+          userInfo.value = {
+            id: data.userId,
+            openid: data.openid,
+            nickname: data.nickname,
+            avatarUrl: data.avatarUrl
+          };
+          userOpenid.value = data.openid || "";
+          uni.setStorageSync("userToken", data.token);
+          uni.setStorageSync("userInfo", JSON.stringify(userInfo.value));
+          loadOrders(); // 刷新订单列表
+        }
+      }).catch(err => {
+        console.error("静默登录失败", err);
+      });
+    }
+  });
+  // #endif
+};
+
+const handleLogout = () => {
+  uni.showModal({
+    title: '提示',
+    content: '确定要退出登录吗？',
+    success: function (res) {
+      if (res.confirm) {
+        userToken.value = "";
+        userInfo.value = null;
+        userOpenid.value = "";
+        uni.removeStorageSync("userToken");
+        uni.removeStorageSync("userInfo");
+        orders.value = [];
+        showNotice("已退出登录");
+      }
+    }
+  });
+};
+
 /**
  * 获取微信 OpenID
  */
@@ -1400,7 +1477,20 @@ watch(searchKeyword, () => {
   }, 300);
 });
 
+watch(activeModule, (newVal) => {
+  if (newVal === 'template') {
+    searchTemplates();
+  } else if (newVal === 'order') {
+    if (userToken.value) {
+      loadOrders();
+    }
+  }
+});
+
 onMounted(async () => {
+  if (!userToken.value) {
+    handleSilentWxLogin();
+  }
   await Promise.all([loadThemes(), loadCategories()]);
   await Promise.all([searchTemplates(), loadOrders()]);
 });
@@ -1478,6 +1568,7 @@ page {
 .template-card { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); position: relative; cursor: pointer; }
 .card-cover { width: 100%; height: 220px; position: relative; }
 .card-tag { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.5); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+.card-price { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.5); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
 .card-info { padding: 10px; }
 .card-info h4 { margin: 0; font-size: 13px; color: #333; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.2); opacity: 0; display: flex; align-items: center; justify-content: center; transition: opacity 0.2s; }
@@ -1486,25 +1577,33 @@ page {
 
 .module-order { padding: 16px; background: #f5f6f8; min-height: 100vh; }
 .module-title { font-size: 18px; margin: 0 0 16px; text-align: center; display: block; color: #333;}
-.module-profile { padding: 16px; background: #f5f6f8; min-height: 100vh; }
-.profile-menu { background: #fff; border-radius: 12px; overflow: hidden; }
-.menu-item { display: flex; align-items: center; padding: 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+.module-profile { background: #f7f8fa; min-height: 100vh; position: relative; padding: 0; }
+.profile-header-bg { background: linear-gradient(135deg, #ff4d6d 0%, #ff758c 100%); height: 180px; border-bottom-left-radius: 40px; border-bottom-right-radius: 40px; padding-top: 44px; }
+.profile-header-title { text-align: center; color: rgba(255,255,255,0.9); font-size: 18px; font-weight: 500; margin-bottom: 20px; }
+.profile-card { background: #fff; border-radius: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.04); margin: -70px 20px 20px; padding: 24px 20px; position: relative; z-index: 2; }
+.profile-user-info { display: flex; align-items: center; }
+.profile-avatar-wrap { margin-right: 16px; flex-shrink: 0; }
+.profile-avatar { width: 64px; height: 64px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 4px 10px rgba(255,77,109,0.15); }
+.profile-avatar-fallback { width: 64px; height: 64px; border-radius: 50%; background: #fdf0f2; color: #ff4d6d; display: flex; align-items: center; justify-content: center; font-weight: 600; border: 3px solid #fff; box-shadow: 0 4px 10px rgba(255,77,109,0.15); }
+.profile-meta { display: flex; flex-direction: column; justify-content: center; }
+.profile-name { font-size: 18px; color: #333; font-weight: 700; margin-bottom: 6px; }
+.profile-id { font-size: 13px; color: #888; }
+.unlogged .profile-avatar-fallback { background: #f5f5f5; color: #aaa; box-shadow: none; border-color: transparent; }
+.unlogged .profile-name { color: #666; font-size: 17px; }
+.unlogged .profile-id { font-size: 12px; }
+.btn-login-small { background: linear-gradient(90deg, #ff4d6d, #ff758c); color: #fff; border: none; padding: 8px 20px; border-radius: 20px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 12px rgba(255,77,109,0.25); cursor: pointer; }
+.btn-login-small:active { opacity: 0.8; transform: scale(0.95); transition: all 0.2s; }
+.profile-menu { background: #fff; border-radius: 20px; margin: 0 20px 20px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.02); }
+.menu-item { display: flex; align-items: center; padding: 18px 20px; border-bottom: 1px solid #f9f9f9; cursor: pointer; transition: background 0.2s; }
+.menu-item:active { background: #fcfcfc; }
 .menu-item:last-child { border-bottom: none; }
-.menu-icon { font-size: 20px; margin-right: 12px; }
-.menu-text { flex: 1; font-size: 15px; color: #333; }
-.menu-arrow { font-size: 18px; color: #ccc; }
-.profile-login-tip { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: center; }
-.profile-user { background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 12px; display: flex; align-items: center; }
-.profile-avatar-wrap { margin-right: 10px; }
-.profile-avatar { width: 44px; height: 44px; border-radius: 50%; }
-.profile-avatar-fallback { width: 44px; height: 44px; border-radius: 50%; background: #f1f3f5; color: #666; display: flex; align-items: center; justify-content: center; font-weight: 600; }
-.profile-meta { display: flex; flex-direction: column; }
-.profile-name { font-size: 14px; color: #222; font-weight: 600; }
-.profile-id { font-size: 12px; color: #888; margin-top: 3px; }
+.menu-icon-wrap { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-right: 14px; }
+.menu-text { flex: 1; font-size: 15px; color: #333; font-weight: 500; }
 .order-list { display: flex; flex-direction: column; gap: 16px; padding-bottom: 20px; }
 .order-card { background: #fff; border-radius: 16px; padding: 18px; box-shadow: 0 4px 24px rgba(0,0,0,0.04); }
 .order-header { display: flex; justify-content: space-between; font-size: 13px; color: #999; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #f5f5f5; }
-.order-status.pending { color: #ff8f1f; font-weight: 600; }
+.order-status.pending { color: #ff8f1f; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
+.order-price { color: #ff4d4f; font-weight: bold; font-size: 14px; background: rgba(255,77,79,0.1); padding: 2px 6px; border-radius: 4px; }
 .order-status.completed, .order-status.paid { color: #00b578; font-weight: 600; }
 .order-body { display: flex; gap: 14px; }
 .order-cover { width: 72px; height: 96px; border-radius: 8px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
@@ -1528,20 +1627,21 @@ page {
 .btn-primary:disabled { background: #ddd; box-shadow: none; cursor: not-allowed; opacity: 1; color: #aaa; }
 .btn-primary:active:not(:disabled) { opacity: 0.9; transform: scale(0.98); }
 
-.module-maker { background: #fff; min-height: 100vh; display: flex; flex-direction: column; }
-.maker-nav { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid #f0f0f0; }
-.maker-nav h2 { margin: 0; font-size: 16px; text-align: center; color: #333;}
-.btn-back { background: transparent; border: none; font-size: 14px; color: #666; cursor: pointer; }
-.maker-cover { height: 260px; position: relative; }
-.btn-preview { position: absolute; bottom: 16px; right: 16px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 14px; border-radius: 20px; border: none; font-size: 12px; cursor:pointer; }
-.maker-form { padding: 20px 16px; flex: 1; }
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 13px; color: #555; margin-bottom: 8px; font-weight: 500; }
-.form-group input { width: 100%; border: none; border-bottom: 1px solid #eee; padding: 10px 0; font-size: 15px; outline: none; transition: border-color 0.2s; color:#333; }
-.form-group input:focus { border-bottom-color: #ff4d6d; }
-.maker-submit { padding: 16px; }
-.btn-generate { width: 100%; background: linear-gradient(90deg, #ff6b81, #ff4d6d); color: #fff; border: none; padding: 14px; border-radius: 24px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px rgba(255,77,109,0.3); cursor: pointer; }
-.btn-generate:disabled { background: #ccc; box-shadow: none; cursor:not-allowed;}
+.module-maker { background: #fdfdfd; min-height: 100vh; display: flex; flex-direction: column; }
+.maker-nav { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #fff; position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+.maker-nav h2 { margin: 0; font-size: 17px; text-align: center; color: #333; font-weight: 600; flex: 1; }
+.btn-back { width: 60px; display: flex; align-items: center; justify-content: flex-start; background: transparent; border: none; font-size: 15px; color: #333; cursor: pointer; padding: 0; font-weight: 500; }
+.maker-cover { height: 260px; position: relative; margin: 16px; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+.btn-preview { position: absolute; bottom: 16px; right: 16px; background: rgba(255,255,255,0.9); color: #333; padding: 8px 16px; border-radius: 20px; border: none; font-size: 13px; font-weight: 600; cursor:pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.maker-form { padding: 8px 20px 30px; flex: 1; }
+.form-group { margin-bottom: 20px; }
+.form-group label { display: block; font-size: 14px; color: #444; margin-bottom: 10px; font-weight: 600; }
+.form-group input { width: 100%; height: 48px; border: 1px solid #eaeaea; background: #fafafa; padding: 0 16px; border-radius: 12px; font-size: 15px; outline: none; transition: all 0.2s; color:#333; box-sizing: border-box; display:flex; align-items:center; }
+.form-group input:focus { border-color: #ff4d6d; background: #fff; box-shadow: 0 0 0 4px rgba(255,77,109,0.08); }
+.maker-submit { padding: 16px 20px 30px; background: #fff; box-shadow: 0 -4px 20px rgba(0,0,0,0.03); }
+.btn-generate { width: 100%; background: linear-gradient(135deg, #ff4d6d, #ff758c); color: #fff; border: none; padding: 16px; border-radius: 28px; font-size: 17px; font-weight: bold; box-shadow: 0 6px 16px rgba(255,77,109,0.25); cursor: pointer; transition: all 0.2s; }
+.btn-generate:disabled { background: #eee; color: #aaa; box-shadow: none; cursor:not-allowed;}
+.btn-generate:active:not(:disabled) { transform: scale(0.98); opacity: 0.9; }
 .maker-result { padding: 16px; border-top: 8px solid #f5f6f8; text-align: center; }
 .maker-result h3 { font-size: 16px; color:#333; }
 .res-img, .res-vid { width: 100%; max-width: 300px; border-radius: 8px; margin-top: 10px; }
